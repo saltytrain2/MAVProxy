@@ -98,6 +98,8 @@ class GenRadioModule(mp_module.MPModule):
             )
             self.module("map").add_menu(self.menu)
 
+        self.start()
+
     def usage(self):
         '''show help on command line options'''
         return "Usage: genradio <start|stop|restart|status|set|drop|remove|clearall>"
@@ -239,11 +241,7 @@ class GenRadioModule(mp_module.MPModule):
         now = time.time()
         if now-self.last_bored > self.boredom_interval:
             self.last_bored = now
-            message = self.boredom_message()
-            self.say("%s: %s" % (self.name,message))
-            # See if whatever we're connected to would like to play:
-            self.master.mav.statustext_send(mavutil.mavlink.MAV_SEVERITY_NOTICE,
-                                            message)
+            self.boredom_message()
 
     def mavlink_packet(self, m):
         '''handle mavlink packets'''
