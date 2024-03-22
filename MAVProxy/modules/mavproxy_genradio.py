@@ -1,25 +1,10 @@
 #!/usr/bin/env python
-'''
-Example Module
-Peter Barker, September 2016
 
-This module simply serves as a starting point for your own MAVProxy module.
-
-1. copy this module sidewise (e.g. "cp mavproxy_example.py mavproxy_coolfeature.py"
-2. replace all instances of "example" with whatever your module should be called
-(e.g. "coolfeature")
-
-3. trim (or comment) out any functionality you do not need
-'''
-
-import os
-import os.path
-import sys
-from pymavlink import mavutil
-import errno
 import time
 import socket
 import pickle
+import string
+import random
 
 from MAVProxy.modules.lib import mp_module
 from MAVProxy.modules.lib import mp_util
@@ -30,7 +15,8 @@ if mp_util.has_wxpython:
     from MAVProxy.modules.mavproxy_map.mp_slipmap import SlipCircle
 
 
-num_sources = 0
+def gen_id(len=20, chars=string.digits + string.ascii_letters):
+    return "".join(random.choice(chars) for _ in range(len))
 
 
 class SimpleRadioSource():
@@ -40,7 +26,7 @@ class SimpleRadioSource():
         self.lat = latlon[0]
         self.lon = latlon[1]
         self.icon = SlipCircle(
-            key=f"radio_{num_sources}",
+            key=gen_id(),
             layer=4,
             latlon=latlon,
             radius=20.0,
@@ -117,8 +103,6 @@ class GenRadioModule(mp_module.MPModule):
 
     def drop(self, Source):
         '''drop a radio source on the map'''
-        global num_sources
-
         latlon = self.mpstate.click_location
         if self.last_click is not None and self.last_click == latlon:
             return
@@ -134,12 +118,9 @@ class GenRadioModule(mp_module.MPModule):
             }
             self.sock.send(pickle.dumps(d))
             self.module("map").map.add_object(radio.icon)
-            num_sources += 1
 
     def clearall(self):
         '''remove all radio sources'''
-        global num_sources
-
         for radio in self.radio_sources:
             self.module("map").map.remove_object(radio.icon.key)
         self.radio_sources = []
@@ -147,18 +128,18 @@ class GenRadioModule(mp_module.MPModule):
             "action": "clear",
         }
         self.sock.send(pickle.dumps(d))
-        num_sources = 0
 
     def remove(self):
-        global num_sources
         latlon = self.mpstate.click_location
         if self.last_click is not None and self.last_click == latlon:
             return
         self.last_click = latlon
+        self._remove_latlon(latlon)
 
+    def _remove_latlon(self, latlon):
         if latlon is not None:
             closest = None
-            closest_distance = 1000
+            closest_distance = 10
 
             for radio in self.radio_sources:
                 if radio.distance_from(latlon[0], latlon[1]) < closest_distance:
@@ -173,7 +154,6 @@ class GenRadioModule(mp_module.MPModule):
                     "key": closest.icon.key,
                 }
                 self.sock.send(pickle.dumps(d))
-                num_sources -= 1
             else:
                 print("No suitable radio sources near click")
 
@@ -185,6 +165,7 @@ class GenRadioModule(mp_module.MPModule):
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect(("127.0.0.1", self.example_settings.port))
+        self.sock.settimeout(0.5)
 
         print(f"Started on port {self.example_settings.port}")
 
@@ -238,10 +219,16 @@ class GenRadioModule(mp_module.MPModule):
 
     def idle_task(self):
         '''called rapidly by mavproxy'''
-        now = time.time()
-        if now-self.last_bored > self.boredom_interval:
-            self.last_bored = now
-            self.boredom_message()
+        if self.sock is not None:
+            d = self.sock.recv(1024)
+            if not d:
+                return
+            d = pickle.loads(d)
+            if d["action"] == "remove":
+                for source in self.radio_sources:
+                    if source.icon.key == d["key"]:
+                        self.radio_sources.remove(source)
+                        self.module("map").map.remove_object(d["key"])
 
     def mavlink_packet(self, m):
         '''handle mavlink packets'''
